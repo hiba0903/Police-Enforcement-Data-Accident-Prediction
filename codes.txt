@@ -1,0 +1,353 @@
+import numpy as numpy
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.model_selection import GridSearchCV
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import GradientBoostingClassifier
+
+
+
+all_sheets = pd.read_excel("working.xlsx", sheet_name=None)
+
+# Concatenate all sheets into a single DataFrame
+merged_data = pd.concat(all_sheets.values(), ignore_index=True)
+
+# Saved to a new file
+merged_data.to_excel("Merged_Data.xlsx", index=False)
+
+data = pd.read_excel("Merged_Data.xlsx")
+
+
+latitude=data['Latitude']
+longitude = data['Longitude']
+Location = pd.DataFrame({'Latitude':latitude,'Longitude':longitude})
+Location
+
+
+data['T -Junction'] = data['T -Junction'].fillna("Unknown")
+
+data['Accident_Severity'] = data['Death'] + data['Grievous'] + data['Minor']
+
+data['Month'] = data['Date Accident'].dt.month
+data['Day_of_Week'] = data['Date Accident'].dt.dayofweek
+
+
+
+# Define the binary target variable
+data['Accident_Occurred'] = ((data['Death'] > 0) |(data['Grievous'] > 0) | (data['Minor'] > 0)).astype(int)
+
+
+# Select features and target variable
+features = ['Weather', 'Type Area', 'Visibility', 'Type Road', 'Road Features']
+X = data[features]  # Features DataFrame
+y = data['Accident_Occurred']  # Target variable
+
+
+
+# One-hot encode categorical features
+X = pd.get_dummies(X)
+
+
+
+#Accident distribution by weather conditions
+
+sns.countplot(x='Weather', hue='Accident_Occurred', data=data)
+plt.title("Accident Occurrence by Weather Conditions")
+plt.xticks(rotation=45, ha='right') 
+plt.tight_layout()  # Adjust layout to ensure everything fits well
+plt.show()
+
+# Plotting correlation heatmap
+numeric_data = data.select_dtypes(include=['number'])
+
+# Compute and plot the correlation heatmap
+plt.figure(figsize=(8, 6))
+sns.heatmap(numeric_data.corr(), annot=True, cmap='coolwarm')
+plt.title("Correlation Matrix")
+plt.show()
+
+
+
+
+
+# Select features (Weather, Visibility, Month, Day_of_Week) and target variable (Accident_Occurred)
+features = ['Weather', 'Visibility', 'Month', 'Day_of_Week']
+X = data[features]
+y = data['Accident_Occurred']
+
+# One-hot encode categorical features
+X_encoded = pd.get_dummies(X, drop_first=True)
+
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X_encoded, y, test_size=0.2, random_state=42)
+
+# Initialize and train a Random Forest model
+model = RandomForestClassifier(random_state=42)
+model.fit(X_train, y_train)
+
+# Make predictions
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]  # Get probability of accident
+
+# Evaluate the model
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
+print(f"Precision: {precision_score(y_test, y_pred):.2f}")
+print(f"Recall: {recall_score(y_test, y_pred):.2f}")
+print(f"F1-Score: {f1_score(y_test, y_pred):.2f}")
+print(f"ROC-AUC: {roc_auc_score(y_test, y_prob):.2f}")
+
+
+
+
+# Get the feature importances from the model
+importances = model.feature_importances_
+
+# Get the names of the features after one-hot encoding
+feature_names = X_encoded.columns
+
+# Plotting feature importances
+plt.figure(figsize=(10, 6))
+plt.barh(feature_names, importances)
+plt.title('Feature Importance')
+plt.xlabel('Importance')
+plt.show()
+
+
+
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+
+# Sample input data (with location included)
+sample_input = {
+    'Weather': ['Clear'],         # Weather: Clear (ideal for driving)
+    'Visibility': ['Good'],       # Visibility: Good (ideal visibility)
+    'Month': [6],                 # Month: June (a dry month, no extreme weather)
+    'Day_of_Week': [0],           # Day of Week: Sunday (lower traffic in many cases)
+    'Location': ['Rural Area']    # Location: A rural area with less traffic
+}
+
+
+
+# Convert the sample input into a DataFrame
+sample_df = pd.DataFrame(sample_input)
+
+# Apply the same preprocessing steps as the training data
+sample_df_encoded = pd.get_dummies(sample_df)
+
+# Ensure  the same column names as X_train)
+sample_df_encoded = sample_df_encoded.reindex(columns=X_train.columns, fill_value=0)
+model = RandomForestClassifier(random_state=42)
+model.fit(X_train, y_train) 
+
+# Make the prediction (0 = no accident, 1 = accident)
+predicted = model.predict(sample_df_encoded)
+
+# Get the probability of accident (for class 1, accident occurred)
+probability = model.predict_proba(sample_df_encoded)[:, 1]
+
+# Display the result
+if predicted[0] == 1:
+    print("An accident is likely under these conditions.")
+else:
+    print("An accident is unlikely under these conditions.")
+
+print(f"Probability of accident: {probability[0]:.2f}")
+
+
+
+
+
+# Apply Platt scaling (logistic calibration)
+calibrated_model = CalibratedClassifierCV(model, method='sigmoid', cv='prefit')
+
+# Fit the calibrated model
+calibrated_model.fit(X_train, y_train)
+
+# Make predictions
+y_pred_calibrated = calibrated_model.predict(X_test)
+y_prob_calibrated = calibrated_model.predict_proba(X_test)[:, 1]
+
+# Evaluate the calibrated model
+print(f"Accuracy: {accuracy_score(y_test, y_pred_calibrated):.2f}")
+print(f"Precision: {precision_score(y_test, y_pred_calibrated):.2f}")
+print(f"Recall: {recall_score(y_test, y_pred_calibrated):.2f}")
+print(f"F1-Score: {f1_score(y_test, y_pred_calibrated):.2f}")
+print(f"ROC-AUC: {roc_auc_score(y_test, y_prob_calibrated):.2f}")
+
+
+
+
+
+from sklearn.calibration import IsotonicRegression
+
+# Apply Isotonic Regression (piecewise constant calibration)
+iso_calibration = IsotonicRegression(out_of_bounds='clip')
+
+# Fit the calibration model to the predicted probabilities
+iso_calibration.fit(model.predict_proba(X_train)[:, 1], y_train)
+
+# Apply the calibration to the predictions
+y_prob_iso_calibrated = iso_calibration.transform(model.predict_proba(X_test)[:, 1])
+
+# Evaluate the calibrated model
+print(f"Calibrated Accuracy: {accuracy_score(y_test, y_pred_calibrated):.2f}")
+print(f"Calibrated Precision: {precision_score(y_test, y_pred_calibrated):.2f}")
+print(f"Calibrated Recall: {recall_score(y_test, y_pred_calibrated):.2f}")
+print(f"Calibrated F1-Score: {f1_score(y_test, y_pred_calibrated):.2f}")
+print(f"Calibrated ROC-AUC: {roc_auc_score(y_test, y_prob_iso_calibrated):.2f}")
+
+
+
+
+
+# Example of using class_weight='balanced' with RandomForestClassifier
+model = RandomForestClassifier(random_state=42, class_weight='balanced')
+model.fit(X_train, y_train)
+
+
+
+
+
+
+param_grid = {
+    'n_estimators': [100, 200, 300],
+    'max_depth': [None, 10, 20, 30],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'max_features': ['auto', 'sqrt', 'log2'],
+    'bootstrap': [True, False]
+}
+
+
+
+
+
+rf = RandomForestClassifier(random_state=42)
+grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=5, n_jobs=-1, verbose=2)
+
+
+
+
+grid_search.fit(X_train, y_train)
+
+
+print("Best parameters found: ", grid_search.best_params_)
+best_model = grid_search.best_estimator_
+
+
+
+
+y_pred = best_model.predict(X_test)
+
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
+print(f"Precision: {precision_score(y_test, y_pred):.2f}")
+print(f"Recall: {recall_score(y_test, y_pred):.2f}")
+print(f"F1-Score: {f1_score(y_test, y_pred):.2f}")
+print(f"ROC-AUC: {roc_auc_score(y_test, best_model.predict_proba(X_test)[:, 1]):.2f}")
+
+
+
+# Logistic Regression
+log_reg = LogisticRegression(random_state=42, max_iter=1000)
+log_reg.fit(X_train, y_train)
+log_reg_pred = log_reg.predict(X_test)
+log_reg_prob = log_reg.predict_proba(X_test)[:, 1]
+
+print("Logistic Regression:")
+print(f"Accuracy: {accuracy_score(y_test, log_reg_pred):.2f}")
+print(f"Precision: {precision_score(y_test, log_reg_pred):.2f}")
+print(f"Recall: {recall_score(y_test, log_reg_pred):.2f}")
+print(f"F1-Score: {f1_score(y_test, log_reg_pred):.2f}")
+print(f"ROC-AUC: {roc_auc_score(y_test, log_reg_prob):.2f}")
+
+
+
+
+import pandas as pd
+
+# Define a single input row
+input_data = pd.DataFrame({
+    "Weather": ["Rainy"],  # Categorical
+    "Visibility": [1200],  # Numerical
+    "Month": [3],          # Numerical
+    "Day_of_Week": ["Wednesday"]  # Categorical
+})
+
+# One-hot encode the input (ensure your model expects these exact columns)
+input_encoded = pd.get_dummies(input_data, drop_first=True).reindex(columns=model.feature_names_in_, fill_value=0)
+
+# Predict using the model
+prediction = model.predict(input_encoded)
+probability = model.predict_proba(input_encoded)[:, 1]
+
+print(f"Prediction: {prediction[0]} (1=Accident, 0=No Accident)")
+print(f"Accident Probability: {probability[0]:.2%}")
+
+
+
+# Gradient Boosting
+
+gb = GradientBoostingClassifier(random_state=42)
+gb.fit(X_train, y_train)
+gb_pred = gb.predict(X_test)
+gb_prob = gb.predict_proba(X_test)[:, 1]
+
+print("\nGradient Boosting:")
+print(f"Accuracy: {accuracy_score(y_test, gb_pred):.2f}")
+print(f"Precision: {precision_score(y_test, gb_pred):.2f}")
+print(f"Recall: {recall_score(y_test, gb_pred):.2f}")
+print(f"F1-Score: {f1_score(y_test, gb_pred):.2f}")
+print(f"ROC-AUC: {roc_auc_score(y_test, gb_prob):.2f}")
+
+
+
+# Define a single input row
+input_data = pd.DataFrame({
+    "Weather": ["Rainy"],       # Categorical input
+    "Visibility": [1500],       # Numerical input (in meters)
+    "Month": [12],              # Numerical input (December)
+    "Day_of_Week": ["Monday"]   # Categorical input
+})
+
+# One-hot encode input data to match the model's expected format
+input_encoded = pd.get_dummies(input_data, drop_first=True).reindex(columns=model.feature_names_in_, fill_value=0)
+
+# Predict accident occurrence and probability
+prediction = model.predict(input_encoded)
+probability = model.predict_proba(input_encoded)[:, 1]  # Probability of "1" (Accident)
+
+# Display results
+print(f"Prediction: {prediction[0]} (1=Accident, 0=No Accident)")
+print(f"Accident Probability: {probability[0]:.2%}")
+
+
+
+
+# Define a single input row (No Accident Scenario)
+input_data = pd.DataFrame({
+    "Weather": ["Clear"],       # Categorical input
+    "Visibility": [5000],       # Numerical input (in meters)
+    "Month": [6],               # Numerical input (June)
+    "Day_of_Week": ["Sunday"]   # Categorical input
+})
+
+# One-hot encode input data to match the model's expected format
+input_encoded = pd.get_dummies(input_data, drop_first=True).reindex(columns=model.feature_names_in_, fill_value=0)
+
+# Predict accident occurrence and probability
+prediction = model.predict(input_encoded)
+probability = model.predict_proba(input_encoded)[:, 1]  # Probability of "1" (Accident)
+
+# Display results
+print(f"Prediction: {prediction[0]} (1=Accident, 0=No Accident)")
+print(f"Accident Probability: {probability[0]:.2%}")
+
+
+
+
